@@ -39,12 +39,6 @@ The goal is to remove manual overtime spreadsheets for team leads while keeping 
 
 ---
 
-## Screenshots
-
-![alt text](image.png)
-
----
-
 ## Features
 
 - 📤 **Upload** – drag and drop a Dialpad WFM timesheet CSV
@@ -73,18 +67,18 @@ The goal is to remove manual overtime spreadsheets for team leads while keeping 
 
 ---
 
-## Tech stack
+## 🧰 Tech stack
 
-- **Language:** Python 3.9
-- **Libraries:**
-  - [Streamlit](https://streamlit.io/) – UI, file upload, layout
-  - [pandas](https://pandas.pydata.org/) – CSV parsing and overtime calculations
-- **Other bits:**
-  - Small amount of **HTML/CSS/JS** inside Streamlit for:
-    - pill-style header badge
-    - “Copy to clipboard” behaviour on the suggested message
+| Layer         | Technology                               | What it does                                                             |
+| ------------- | ---------------------------------------- | ------------------------------------------------------------------------ |
+| Language      | **Python 3.9**                           | Core logic, data processing, and Streamlit app                           |
+| Web framework | **Streamlit**                            | Renders the UI, handles file upload, inputs, layout, and downloads       |
+| Data layer    | **pandas**                               | Parses the Dialpad CSV, groups by user/week, and calculates overtime     |
+| Styling       | **HTML / CSS (inline in Streamlit)**     | Pill-style header badge, layout tweaks, dark styling                     |
+| UX helpers    | **Vanilla JS (in Streamlit components)** | Handles the “Copy to clipboard” behaviour for the People/Payroll message |
 
-The app currently runs **locally** in a Python virtual environment. No external APIs are called.
+> The app currently runs **locally** in a Python virtual environment.  
+> No external APIs are called – everything stays on your machine.
 
 ---
 
@@ -126,42 +120,67 @@ pip installed
    streamlit run app.py
    Streamlit will open the app in your browser (usually at http://localhost:8501).
 
-How to use
+## 🚀 How to use
 
-Select your team from the dropdown (Fraud Operations, Customer Support, Core Ops / Payment Ops, Compliance Ops).
+Once the app is running (`streamlit run app.py`), the flow is:
 
-Set the contracted weekly hours for that team (e.g. 45).
+1. 🧩 **Select your team**
 
-Export the standard timesheet CSV from Dialpad WFM.
+   - Use the **“Select your team”** dropdown at the top-right.
+   - Options: `Fraud Operations`, `Customer Support`, `Core Ops / Payment Ops`, `Compliance Ops`.
 
-Upload the CSV into Overtime Helper.
+2. ⏱️ **Set contracted weekly hours**
 
-Review the results:
+   - In **“Contracted weekly hours (default for <team>)”**, enter the standard weekly hours  
+     for that team (for example **45**).
+   - You can add per-person exceptions later in code if needed.
 
-Top-level metrics (total shifts, agent-weeks, total overtime hours)
+3. 📤 **Export the timesheet from Dialpad**
 
-Weekly and period summaries
+   - In Dialpad WFM, export the **standard timesheet CSV** for the period you care about  
+     (e.g. the month you want to pay overtime for).
 
-“No overtime detected…” message or a list of colleagues with overtime
+4. 📥 **Upload the CSV into Overtime Helper**
 
-Copy the suggested message into Slack/email and attach the downloaded CSVs for People / Payroll.
+   - Drag and drop the CSV into the **“Upload Dialpad timesheet CSV”** area, or click  
+     **“Browse files”** to select it.
 
-Data & privacy
+5. 📊 **Review the results**
 
-The app only processes data from the uploaded Dialpad CSV.
+   - Top metrics at the top:
+     - **Total shifts**
+     - **Agent-weeks**
+     - **Total overtime hours**
+   - **Weekly summary** tab:
+     - One row per person per week with `total_hours`, `contracted_hours`, `overtime_hours`.
+   - **Period summary** tab:
+     - Aggregated view per person across the uploaded date range.
 
-All processing happens locally on the user’s machine.
+6. 🔎 **Check overtime status**
 
-No data is sent to external services unless a user manually shares the generated CSVs.
+   - If there is **no overtime**, you’ll see a green success banner like:
+     > “No overtime detected for \<team\> for the selected period…”
+   - If there **is overtime**, you’ll see:
+     - A warning banner with the **total OT hours**, and
+     - A small table listing **who** has overtime and **how much**.
 
-For real company use, keep Dialpad exports and OT outputs out of Git history and shared repos.
+7. ✉️ **Generate the People / Payroll message**
 
-Roadmap / ideas
+   - Scroll to **“Suggested message for People / Payroll”**.
+   - The textarea contains a pre-filled message that already:
+     - Mentions the **team**
+     - Includes the **date range**
+     - States the **total overtime hours** (or no OT)
+   - You can edit this text directly.
 
-🔐 Hosted internal instance (rather than local only)
+8. 📋 **Copy and send**
 
-⚙️ Config UI for contracted hours & per-user overrides (no code edits)
+   - Click **“Copy to clipboard”** to grab the final message.
+   - Paste it into Slack or email and attach:
+     - `ot_weekly_summary.csv`
+     - `ot_monthly_summary.csv`
 
-📈 Downloadable or embedded charts (OT trend over time, per team / person)
-
-🔗 Direct API integrations with WFM / payroll tooling (where available)
+9. 🔐 **Data & privacy**
+   - The app only processes data from the uploaded Dialpad CSV.
+   - All processing happens locally on your machine.
+   - No data is sent anywhere unless you manually share the exported CSVs.
