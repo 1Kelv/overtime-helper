@@ -8,8 +8,7 @@ import streamlit.components.v1 as components
 # Per-email contracted hours overrides (optional).
 # Leaving empty for now, will fill once People confirm exact contracts.
 CONTRACTED_WEEKLY_BY_EMAIL = {
-    # "kelvin.olasupo@nala.money": 45,
-    # "mame.ngom@...": 40,
+
 }
 
 # ========================================================
