@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
+from typing import Optional, Set
 
 # ======================================================
 # Config
@@ -13,11 +14,12 @@ st.set_page_config(
 )
 
 # Default contracted weekly hours – can be overridden in UI
-CONTRACTED_WEEKLY_DEFAULT = 45.0
+CONTRACTED_WEEKLY_DEFAULT = 40.0
 CONTRACTED_WEEKLY_BY_EMAIL: dict[str, float] = {}
 
 # Team-specific standard shift lengths (incl. 1h unpaid lunch if >= shift length)
 SHIFT_HOURS_BY_TEAM = {
+    "All Ops (9-hour teams)": 9.0,
     "Fraud Operations": 9.0,
     "Customer Support": 9.0,
     "Core Ops / Payment Ops": 12.0,  # ✅ special rule from Jerry
@@ -27,30 +29,65 @@ SHIFT_HOURS_BY_TEAM = {
 
 KENYA_TZ = "Africa/Nairobi"
 
-# Kenyan gazetted public holidays for 2025
-KENYA_BANK_HOLIDAYS_2025 = {
+# Base gazetted Kenyan public holidays for 2025
+BASE_KENYA_BANK_HOLIDAYS_2025: Set[date] = {
     date(2025, 1, 1),   # New Year's Day
     date(2025, 3, 31),  # Idd-ul-Fitr (approx – varies with lunar calendar)
     date(2025, 4, 18),  # Good Friday
     date(2025, 4, 21),  # Easter Monday
     date(2025, 5, 1),   # Labour Day
     date(2025, 6, 1),   # Madaraka Day
-    date(2025, 6, 7),   # Idd-ul-Azha (approx – varies)
-    date(2025, 10, 10), # Huduma / Mazingira Day
+    date(2025, 6, 7),   # Idd-ul-Azha (approx – varies with lunar calendar)
+    date(2025, 10, 10), # Mazingira / Huduma Day
     date(2025, 10, 20), # Mashujaa Day
     date(2025, 12, 12), # Jamhuri Day
     date(2025, 12, 25), # Christmas Day
     date(2025, 12, 26), # Boxing Day
 }
 
+# Default ad-hoc holidays – includes the national mourning day example
+DEFAULT_AD_HOC_BANK_HOLIDAYS: Set[date] = {
+    date(2025, 10, 17),  # National day of mourning – treat as bank holiday
+}
+
 # ======================================================
-# Core helpers
+# Helper to parse extra BH dates from the UI
 # ======================================================
+
+
+def parse_extra_holiday_dates(text: str) -> Set[date]:
+    """
+    Parse a comma-separated list of YYYY-MM-DD strings into a set of date objects.
+    Ignores blanks and any invalid entries quietly.
+    """
+    extra: Set[date] = set()
+    if not text:
+        return extra
+
+    for part in text.split(","):
+        s = part.strip()
+        if not s:
+            continue
+        try:
+            dt = pd.to_datetime(s).date()
+            extra.add(dt)
+        except Exception:
+            # Silently skip invalid entries – we can surface a small note in the UI instead.
+            continue
+
+    return extra
+
+
+# ======================================================
+# Core engine helpers
+# ======================================================
+
 
 def prepare_shifts(
     df: pd.DataFrame,
     enable_kenyan_bh: bool = True,
     shift_hours: float = 9.0,
+    bank_holidays: Optional[Set[date]] = None,
 ) -> pd.DataFrame:
     """Normalise raw Dialpad CSV and flag bank holidays."""
     df = df.copy()
@@ -103,12 +140,14 @@ def prepare_shifts(
     else:
         df["is_kenya_employee"] = False
 
-    # Bank-holiday detection (Kenya only for now)
+    # Bank-holiday detection (Kenya)
     if enable_kenyan_bh:
+        bh_set: Set[date] = bank_holidays or BASE_KENYA_BANK_HOLIDAYS_2025
+
         def _is_bank_holiday(row) -> bool:
             if not row["is_kenya_employee"]:
                 return False
-            return row["shift_date"].date() in KENYA_BANK_HOLIDAYS_2025
+            return row["shift_date"].date() in bh_set
 
         df["is_bank_holiday"] = df.apply(_is_bank_holiday, axis=1)
     else:
@@ -211,8 +250,6 @@ def build_pivot_from_granular(granular: pd.DataFrame) -> pd.DataFrame:
     This shows, per person:
       - OT days / hours
       - Bank holiday days / hours
-
-    It is basically another way to see how the summary table is created.
     """
     if granular.empty:
         return granular
@@ -253,9 +290,6 @@ def build_pivot_from_granular(granular: pd.DataFrame) -> pd.DataFrame:
 def build_teams_with_ot(summary_table: pd.DataFrame) -> pd.DataFrame:
     """
     Roll-up per team, only including teams that actually have OT or BH.
-
-    This will be more interesting once an API worker processes multiple
-    teams in one go, but the logic is ready now.
     """
     if summary_table.empty:
         return summary_table
@@ -363,6 +397,7 @@ col_team, col_mode = st.columns([3, 2])
 with col_team:
     team_options = [
         "Fraud Operations",
+        "All Ops (9-hour teams)",
         "Customer Support",
         "Core Ops / Payment Ops",
         "Compliance Ops",
@@ -394,6 +429,13 @@ st.caption(
     f"(1 hour unpaid lunch if they work at least a full shift)."
 )
 
+if team_name == "All Ops (9-hour teams)":
+    st.info(
+        "Use this when you have a **combined CSV** for all 9-hour Ops teams "
+        "(Fraud Ops, Customer Support, Compliance Ops, Treasury Ops). "
+        "Core Ops / Payment Ops still run separately using their 12-hour option."
+    )
+
 # Contracted hours / days (still editable if needed)
 col_a, col_b = st.columns(2)
 with col_a:
@@ -415,6 +457,7 @@ with col_b:
         help="Used to decide which days in a week count as overtime days.",
     )
 
+# Kenyan bank holiday controls
 enable_kenyan_bh = st.checkbox(
     "Apply Kenyan bank-holiday rules (Africa/Nairobi)",
     value=True,
@@ -423,6 +466,27 @@ enable_kenyan_bh = st.checkbox(
         "and are flagged separately from normal overtime."
     ),
 )
+
+extra_bh_input = ""
+parsed_extra_holidays: Set[date] = set()
+
+if enable_kenyan_bh:
+    st.markdown("**Extra Kenyan bank holidays (optional)**")
+    extra_bh_input = st.text_input(
+        "One-off dates (YYYY-MM-DD, comma-separated)",
+        value="2025-10-17",
+        help=(
+            "For national days of mourning or other one-off holidays that should "
+            "count as bank-holiday pay. Example: 2025-10-17."
+        ),
+    )
+    parsed_extra_holidays = parse_extra_holiday_dates(extra_bh_input)
+
+    if parsed_extra_holidays:
+        pretty = ", ".join(sorted(d.isoformat() for d in parsed_extra_holidays))
+        st.caption(f"Treating these as **extra Kenyan bank holidays**: {pretty}")
+    else:
+        st.caption("No extra Kenyan bank-holiday dates detected from the input above.")
 
 uploaded_file = st.file_uploader(
     "Upload a Dialpad timesheet CSV", type=["csv"]
@@ -440,10 +504,18 @@ if uploaded_file is None:
 
 raw_df = pd.read_csv(uploaded_file)
 
+# Combine base + default ad-hoc + user-entered ad-hoc holidays
+all_bank_holidays: Set[date] = (
+    BASE_KENYA_BANK_HOLIDAYS_2025
+    | DEFAULT_AD_HOC_BANK_HOLIDAYS
+    | parsed_extra_holidays
+)
+
 df = prepare_shifts(
     raw_df,
     enable_kenyan_bh=enable_kenyan_bh,
     shift_hours=shift_hours,
+    bank_holidays=all_bank_holidays,
 )
 df = flag_overtime_days(
     df,
@@ -566,6 +638,16 @@ with tab4:
                 use_container_width=True,
             )
 
+    st.markdown("---")
+    st.markdown("**Advanced export** – prepared shifts (for debugging / engineers)")
+    st.download_button(
+        "Raw prepared data (CSV)",
+        data=df.to_csv(index=False).encode("utf-8"),
+        file_name="ot_prepared_shifts.csv",
+        mime="text/csv",
+        help="The prepared shifts data after applying all flags and calculations.",
+    )
+
 # ======================================================
 # Downloads
 # ======================================================
@@ -573,8 +655,7 @@ with tab4:
 st.markdown("---")
 st.subheader("Downloads for People / Payroll")
 
-col1, col2, col3, col4, col5 = st.columns(5)
-
+# Build CSV blobs
 summary_csv = summary_table.to_csv(index=False).encode("utf-8")
 granular_csv = granular_table.to_csv(index=False).encode("utf-8")
 weekly_csv = weekly_summary.to_csv(index=False).encode("utf-8")
@@ -584,6 +665,8 @@ teams_csv = (
     if not teams_with_ot.empty
     else None
 )
+
+col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
     st.download_button(
@@ -626,10 +709,40 @@ with col5:
             mime="text/csv",
             help=(
                 "Roll-up per team, only including teams that actually have "
-                "overtime or bank-holiday hours. This will power the "
-                "all-teams API worker later."
+                "overtime or bank-holiday hours. This is what an API worker "
+                "would use to decide which teams to pull."
             ),
         )
     else:
         st.write("No OT / BH teams in this file.")
-    
+
+# --- Ops-wide exports (roadmap for Dialpad API) ---
+st.markdown("### Ops-wide exports (roadmap)")
+
+c1, c2 = st.columns(2)
+
+with c1:
+    st.button(
+        "All 9-hour Ops teams (Fraud, Support, Compliance, Treasury)",
+        disabled=True,
+        help=(
+            "Planned: once Dialpad API access is in place, this will pull all "
+            "9-hour Ops teams that have OT and download a single combined CSV."
+        ),
+    )
+
+with c2:
+    st.button(
+        "Core Ops / Payment Ops (12-hour)",
+        disabled=True,
+        help=(
+            "Planned: separate combined export for Core Ops / Payment Ops "
+            "using 12-hour shift rules."
+        ),
+    )
+
+st.caption(
+    "These ops-wide buttons will light up once Edo/Jerry give the green light "
+    "for Dialpad API integration. For now, upload a CSV per team above and use "
+    "the standard download buttons."
+)
